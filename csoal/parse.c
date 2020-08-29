@@ -1,7 +1,7 @@
 /** Lexer section **/
 
 #define delimiters "()[]{}"
-#define token_chars "(){}[]\"\\'"
+#define token_chars "(){}[]\"\\':"
 
 enum lex_mode {
 	LX_MODE_NORMAL,
@@ -20,6 +20,7 @@ enum token_type {
 	TOK_CURLY_CLOSE  = '}',
 	TOK_QUOTE        = '\'',
 	TOK_DOUBLE_QUOTE = '"',
+	TOK_COLON        = ':',
 	
 	TOK_IDENTIFIER   = 256,
 	TOK_INTEGER,
@@ -181,13 +182,15 @@ enum keywords {
 	KW_DEF,
 	KW_VAR,
 	KW_PROC,
+	KW_RET,
 };
 
 static const char *const keyword_strs[] = {
 	"pub",
 	"def",
 	"var",
-	"proc"
+	"proc",
+	"return",
 };
 
 struct parser_state {
@@ -223,6 +226,7 @@ static bool	 consume_form(struct parser_state *ps, struct formnode *form);
 static bool	 consume_block(struct parser_state *ps, struct blocknode *bnp);
 static bool	 consume_exprnode(struct parser_state *ps, struct exprnode *out);
 static bool	 consume_def(struct parser_state *ps, struct defnode *out);
+static bool	 consume_type_annotation(struct parser_state *psp, struct type_annotation_node *res);
 static bool	 consume_type_annotation(struct parser_state *psp, struct type_annotation_node *res);
 static bool	 consume_var(struct parser_state *psp, struct varnode *res);
 static struct toplevelnode
@@ -352,7 +356,25 @@ static bool consume_integer(struct parser_state *ps, struct intnode *integer)
 
 static bool consume_paramlist(struct parser_state *ps, struct argnode **out)
 {
-	return consume_paren(ps, '(') && consume_paren(ps, ')');
+	if (!consume_paren(ps, '('))
+		return false;
+
+	struct identnode in;
+	struct type_annotation_node tn;
+	while (consume_iden(ps, &in)) {
+		if (!consume_type_annotation(ps, &tn))
+			errlocv_abort(ps->lxstate.location,
+			              "Expected type declaration for parameter %s",
+			              in.identifier);
+		printf("parameter name: %s, type name %s\n", in.identifier, tn.identifier.identifier);
+		fflush(stdout);
+	}
+
+	if (!consume_paren(ps, ')'))
+		errloc_abort(ps->lxstate.location,
+		             "Expected closing parenthesis");
+
+	return true;
 }
 
 static void consume_block_inner(struct parser_state *ps, struct blocknode *bnp)
@@ -447,6 +469,27 @@ static bool consume_block(struct parser_state *ps, struct blocknode *bnp)
 	return true;
 }
 
+static bool consume_ret(struct parser_state *ps, struct retnode *res)
+{
+	memset(res, 0, sizeof(struct retnode));
+	res->location = ps->lxstate.location;
+
+	if (!consume_paren(ps, '('))
+		return false;
+
+	if (!consume_kw(ps, KW_RET))
+	    return false;
+
+	if (consume_exprnode(ps, res->expr))
+		if (res->expr->type == EXPR_RET)
+			errloc_abort(res->expr->location, "Nested returns not allowed");
+
+	if (!consume_paren(ps, ')'))
+		errloc_abort(ps->lxstate.location, "Expected closing parenthesis");
+	
+	return true;
+}
+
 static bool consume_exprnode(struct parser_state *ps, struct exprnode *out)
 {
 	memset(out, 0, sizeof(struct exprnode));
@@ -459,6 +502,9 @@ static bool consume_exprnode(struct parser_state *ps, struct exprnode *out)
 		return true;
 	} else if (consume_proc(ps, &out->value.proc)) {
 		out->type = EXPR_PROC;
+		return true;
+	} else if (consume_ret(ps, &out->value.ret)) {
+		out->type = EXPR_RET;
 		return true;
 	} else if (consume_form(ps, &out->value.form)) {
 		out->type = EXPR_FORM;
@@ -513,7 +559,27 @@ static bool consume_type_annotation(
 	struct parser_state *psp,
 	struct type_annotation_node *res)
 {
-	/* @TODO: implement this */
+	struct parser_state_snapshot snap = make_parser_snapshot(psp);
+
+	memset(res, 0, sizeof(struct type_annotation_node));
+	res->location = psp->lxstate.location;
+
+	if (!consume_paren(psp, '('))
+		return false;
+
+	if (!consume_char_tok(psp, ':'))
+		goto nope;
+
+	if (!consume_iden(psp, &res->identifier))
+		errloc_abort(psp->lxstate.location, "Expected identifier for type");
+
+	if (!consume_paren(psp, ')'))
+		errloc_abort(psp->lxstate.location, "Expected closing parenthesis");
+
+	return true;
+
+nope:
+	restore_parser_snapshot(psp, &snap);
 	return false;
 }
 

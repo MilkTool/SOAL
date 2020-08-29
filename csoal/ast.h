@@ -28,16 +28,23 @@ struct formnode {
 	struct exprnode *args;
 };
 
+struct retnode {
+	struct srcloc location;
+	struct exprnode *expr;
+};
+
 enum expr_type {
 	EXPR_INTEGER,
 	EXPR_IDENTIFIER,
 	EXPR_PROC,
 	EXPR_FORM,
 	EXPR_BLOCK,
-	EXPR_VAR
+	EXPR_VAR,
+	EXPR_RET
 };
 
 struct type_annotation_node {
+	struct srcloc location;
 	struct identnode identifier;
 };
 
@@ -51,6 +58,7 @@ struct exprnode {
 		struct formnode form;
 		struct blocknode block;
 		struct varnode *var;
+		struct retnode ret;
 	} value;
 };
 
